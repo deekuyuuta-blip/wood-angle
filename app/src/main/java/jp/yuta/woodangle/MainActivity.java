@@ -249,7 +249,7 @@ public class MainActivity extends Activity implements CameraSource.Callback, Jud
 
     private static String modeName(int m) {
         switch (m) {
-            case AngleAnalyzer.MODE_SLAB: return "背板の向き";
+            case AngleAnalyzer.MODE_SLAB: return "形と向き";
             case AngleAnalyzer.MODE_EDGE: return "角度（エッジ）";
             default: return "角度（輪郭）";
         }
@@ -302,8 +302,9 @@ public class MainActivity extends Activity implements CameraSource.Callback, Jud
     private void showLive(AngleAnalyzer.Result r) {
         if (r.ok) {
             double a = AngleAnalyzer.normalize(r.angleDeg - prefs.offset());
-            String dir = r.direction == AngleAnalyzer.DIR_NONE ? ""
-                    : "平らな面 " + AngleAnalyzer.dirName(AngleAnalyzer.directionOf(r.flatNormalDeg - prefs.offset())) + "  ";
+            String dir = r.shape == AngleAnalyzer.SHAPE_UNKNOWN ? ""
+                    : AngleAnalyzer.describe(r.shape, r.direction == AngleAnalyzer.DIR_NONE ? AngleAnalyzer.DIR_NONE
+                    : AngleAnalyzer.directionOf(r.flatNormalDeg - prefs.offset())) + "  ";
             liveText.setText(String.format(Locale.ROOT, "ライブ %s%+.1f°  信頼度 %.0f%s", dir, a, r.confidence,
                     r.message.isEmpty() ? "" : "\n" + r.message));
         } else {
@@ -326,14 +327,15 @@ public class MainActivity extends Activity implements CameraSource.Callback, Jud
         boolean ok = o.code == Judge.RES_OK;
         if (slabMode()) {
             boolean down = ok && o.direction == AngleAnalyzer.DIR_DOWN;
-            angleText.setText(!ok ? "NG" : (AngleAnalyzer.dirName(o.direction) + (down ? " OK" : "")));
+            angleText.setText(!ok ? "NG" : (down ? "OK" : "向き違い"));
             angleText.setTextColor(down ? COLOR_OK : COLOR_NG);
         } else {
             angleText.setText(o.code == Judge.RES_CAMERA ? "--.-°" : String.format(Locale.ROOT, "%+.1f°", o.angleDeg));
             angleText.setTextColor(ok ? COLOR_OK : COLOR_NG);
         }
         String time = new SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(new Date(o.atMillis));
-        resultText.setText((o.manual ? "テスト判別" : "要求番号 " + o.requestNo) + "  " + o.codeText()
+        resultText.setText((slabMode() && ok ? AngleAnalyzer.describe(o.shape, o.direction) + "\n" : "")
+                + (o.manual ? "テスト判別" : "要求番号 " + o.requestNo) + "  " + o.codeText()
                 + "  " + time + (ok ? String.format(Locale.ROOT, "\n角度 %+.1f°  ", o.angleDeg) : "\n") + "信頼度 " + Math.round(o.confidence) + "  処理 " + o.elapsedMs + "ms"
                 + (o.message.isEmpty() ? "" : "\n" + o.message));
         resultText.setTextColor(ok ? 0xFF212121 : COLOR_NG);

@@ -18,6 +18,7 @@ port = int(sys.argv[2]) if len(sys.argv) > 2 else 5000
 interval = float(sys.argv[3]) if len(sys.argv) > 3 else 3.0
 RESULT = {0: "-", 1: "判別OK", 2: "NG", 3: "カメラ異常"}
 DIRECTION = {0: "不明", 1: "下(OK)", 2: "上", 3: "左", 4: "右"}
+SHAPE = {0: "不明", 1: "背板", 2: "平行板", 3: "食パン形", 4: "四角"}
 
 
 def frame(cmd, sub, data):
@@ -66,10 +67,10 @@ while True:
     call(s, frame(0x1401, 0, head(0, 0xA8, 1) + struct.pack("<H", req)))
     # スマホ → PLC（読出し）
     d = struct.unpack("<9h", call(s, frame(0x0401, 0, head(100, 0xA8, 9))))
-    done, res, dr, ang, cx, cy, conf, hb, ms = d
+    done, res, dr, shp, bits, ang, conf, hb, ms = d
     if waiting and done == req:
-        print("要求%5d  %-6s 平らな面 %-6s 角度 %+6.1f°  信頼度 %3d  スマホ処理 %4dms  往復 %4.0fms"
-              % (req, RESULT.get(res, res), DIRECTION.get(dr, dr), ang / 10, conf, ms, (time.time() - sent_at) * 1000))
+        print("要求%5d  %-6s %-5s 基準面 %-6s 平ら面ビット %2d  角度 %+6.1f°  信頼度 %3d  スマホ処理 %4dms  往復 %4.0fms"
+              % (req, RESULT.get(res, res), SHAPE.get(shp, shp), DIRECTION.get(dr, dr), bits, ang / 10, conf, ms, (time.time() - sent_at) * 1000))
         waiting = False
         next_req = time.time() + interval
     elif waiting and now - sent_at > 5:

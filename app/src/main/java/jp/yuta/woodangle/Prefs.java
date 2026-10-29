@@ -29,7 +29,9 @@ final class Prefs {
     int minContrast() { return sp.getInt("minContrast", 20); }
     int average() { return sp.getInt("average", 3); }
     int waitMs() { return sp.getInt("waitMs", 150); }
-    int minConfidence() { return sp.getInt("minConf", 30); }
+    int minConfidence() { return sp.getInt("minConf", 20); }
+    int shape() { return sp.getInt("shape", AngleAnalyzer.SHAPE_UNKNOWN); }
+    int flatMin() { return sp.getInt("flatMin", 35); }
     float offset() { return sp.getFloat("offset", 0f); }
     boolean torch() { return sp.getBoolean("torch", false); }
 
@@ -55,6 +57,8 @@ final class Prefs {
         p.roiBottom = roiB();
         p.minAreaPercent = minArea();
         p.minContrast = minContrast();
+        p.shape = shape();
+        p.flatMinPercent = flatMin();
         return p;
     }
 

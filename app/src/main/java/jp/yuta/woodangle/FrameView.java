@@ -14,7 +14,7 @@ import android.view.View;
  * カメラ画像（判別に使う縮小画像そのもの）と判別結果を描く。
  *  黄色の枠：判別範囲、緑：木材と判定した画素（輪郭）／強いエッジ（エッジ）
  *  赤い線：測った軸、水色の線：基準角度（ゼロ合わせ）
- *  背板モードの矢印：平らな面の向き（下=緑、それ以外=橙）
+ *  形と向きモードの矢印：基準面（OKのとき下に来る面）の向き（下=緑、それ以外=橙）
  * 範囲設定モードでは、指でなぞった四角を新しい判別範囲にする。
  */
 final class FrameView extends View {
@@ -132,7 +132,7 @@ final class FrameView extends View {
             float len = (float) Math.max(r.halfLength, 20) * s;
             if (offsetDeg != 0) line(c, cx, cy, offsetDeg, len * 1.15f, pRef);
             if (r.ok && r.direction != AngleAnalyzer.DIR_NONE) {
-                // 背板：平らな面の向きを矢印で
+                // 基準面（背板：平らな面、食パン形：丸い面の反対、平行板：平ら面）の向きを矢印で
                 int dir = AngleAnalyzer.directionOf(r.flatNormalDeg - offsetDeg);
                 pArrow.setColor(dir == AngleAnalyzer.DIR_DOWN ? 0xFF00E676 : 0xFFFF9100);
                 double t = Math.toRadians(r.flatNormalDeg);
@@ -143,8 +143,11 @@ final class FrameView extends View {
                     c.drawLine(ex, ey, ex + (float) (Math.cos(h) * len * 0.3), ey - (float) (Math.sin(h) * len * 0.3), pArrow);
                 }
                 line(c, cx, cy, r.angleDeg, len, pAxis);
-                c.drawText("平らな面：" + AngleAnalyzer.dirName(dir) + (dir == AngleAnalyzer.DIR_DOWN ? "（OK）" : ""),
+                c.drawText(AngleAnalyzer.describe(r.shape, dir) + (dir == AngleAnalyzer.DIR_DOWN ? "（OK）" : ""),
                         ox + 12, oy + fh * s - 12, pText);
+            } else if (r.ok && r.shape != AngleAnalyzer.SHAPE_UNKNOWN) {
+                line(c, cx, cy, r.angleDeg, len, pAxis);
+                c.drawText(AngleAnalyzer.describe(r.shape, AngleAnalyzer.DIR_NONE), ox + 12, oy + fh * s - 12, pText);
             } else if (r.ok) {
                 line(c, cx, cy, r.angleDeg, len, pAxis);
                 c.drawCircle(cx, cy, pAxis.getStrokeWidth() * 1.6f, pAxis);

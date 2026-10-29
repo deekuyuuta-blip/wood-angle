@@ -27,9 +27,9 @@ public class SettingsActivity extends Activity {
     private static final int DEC = InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED;
 
     private Prefs prefs;
-    private EditText plcIp, port, reqDev, resDev, average, waitMs, minConf, minArea, minContrast, offset;
+    private EditText plcIp, port, reqDev, resDev, average, waitMs, minConf, minArea, minContrast, offset, flatMin;
     private EditText roiL, roiT, roiR, roiB;
-    private RadioGroup mode, polarity;
+    private RadioGroup mode, polarity, shape;
     private CheckBox autoStart;
 
     @Override
@@ -57,7 +57,7 @@ public class SettingsActivity extends Activity {
                 "PLCが撮影要求番号（1〜32767）を書込むワードデバイス。番号が変わるたびに1回判別します。");
         reqDev.setText(prefs.requestDevice());
         resDev = field(f, "結果デバイスの先頭（スマホ → PLC）", "例: D100", TEXT,
-                "ここから9ワード：完了番号・結果・向き・角度(0.1°)・中心X・中心Y・信頼度・ハートビート・処理時間。");
+                "ここから9ワード：完了番号・結果・向き・形・平ら面ビット・角度(0.1°)・信頼度・ハートビート・処理時間。");
         resDev.setText(prefs.resultDevice());
         autoStart = new CheckBox(this);
         autoStart.setText("アプリ起動時に自動で待受を開始");
@@ -65,11 +65,17 @@ public class SettingsActivity extends Activity {
         f.addView(autoStart);
 
         section(f, "判別のしかた");
-        mode = radios(f, new String[]{"背板の向き（木口の平らな面が上下左右のどれか）", "角度：輪郭（木材全体が映る）", "角度：エッジ（木材が画面からはみ出す・木目）"},
+        mode = radios(f, new String[]{"木口の形と向き（背板・平行板・食パン形）", "角度：輪郭（木材全体が映る）", "角度：エッジ（木材が画面からはみ出す・木目）"},
                 indexOf(MODE_VALUES, prefs.mode()));
-        note(f, "背板の向き：木口を背景との明るさの差で切り出し、まっすぐな面（平らな面）と丸い面を見分けます。木口全体が判別範囲に入るようにしてください。\n輪郭：木材の長手方向の角度を測ります。\nエッジ：画面内の縁・木目の向きの平均を測ります。");
+        note(f, "形と向き：木口を背景との明るさの差で切り出し、上下左右の4辺それぞれが平らか丸いかを見分けます。木口全体が判別範囲に入るようにしてください。\n輪郭：木材の長手方向の角度を測ります。\nエッジ：画面内の縁・木目の向きの平均を測ります。");
         label(f, "木材（木口）の明るさ");
         polarity = radios(f, new String[]{"自動", "木材が背景より明るい", "木材が背景より暗い"}, prefs.polarity());
+        label(f, "木口の形（形と向きモード）");
+        shape = radios(f, new String[]{"自動（平らな面の数で見分ける）", "背板だけ（平ら1面）", "平行板だけ（平ら2面）", "食パン形だけ（平ら3面）"}, prefs.shape());
+        note(f, "流れてくる形が決まっているなら、その形を選ぶと判別が安定します。");
+        flatMin = field(f, "平らな面の判定（%）", "例: 35", NUM,
+                "自動のとき、辺の平らさ（直線に接する長さ×まっすぐさ）がこれ以上なら平らな面とみなします（10〜90）。");
+        flatMin.setText(String.valueOf(prefs.flatMin()));
         minArea = field(f, "最小面積（%）", "例: 2", NUM, "判別範囲に対して、これより小さいかたまりは木材とみなしません。");
         minArea.setText(String.valueOf(prefs.minArea()));
         minContrast = field(f, "最小コントラスト", "例: 20", NUM, "木材と背景の明るさの差（0〜255）がこれ未満ならNG。");
@@ -90,7 +96,7 @@ public class SettingsActivity extends Activity {
         waitMs = field(f, "要求後の待ち時間（ms）", "例: 150", NUM,
                 "要求を受けてからこの時間より後の画像を使います。古い画像や停止直後の揺れをよけるため（0〜2000）。");
         waitMs.setText(String.valueOf(prefs.waitMs()));
-        minConf = field(f, "最小信頼度", "例: 30", NUM, "平均の信頼度がこれ未満なら結果NG（0〜100）。");
+        minConf = field(f, "最小信頼度", "例: 20", NUM, "平均の信頼度がこれ未満なら結果NG（0〜100）。");
         minConf.setText(String.valueOf(prefs.minConfidence()));
         offset = field(f, "基準角度（°）", "例: 0", DEC, "測った角度からこの値を引いて返します。メイン画面の「基準にする」でも設定できます。");
         offset.setText(String.format(Locale.ROOT, "%.1f", prefs.offset()));
@@ -130,8 +136,8 @@ public class SettingsActivity extends Activity {
             err(reqDev, "結果デバイスの9ワードと重なっています");
             return;
         }
-        Integer area = intIn(minArea, 0, 90), con = intIn(minContrast, 1, 255);
-        if (area == null || con == null) return;
+        Integer area = intIn(minArea, 0, 90), con = intIn(minContrast, 1, 255), fm = intIn(flatMin, 10, 90);
+        if (area == null || con == null || fm == null) return;
         Integer l = intIn(roiL, 0, 100), t = intIn(roiT, 0, 100), rr = intIn(roiR, 0, 100), b = intIn(roiB, 0, 100);
         if (l == null || t == null || rr == null || b == null) return;
         if (rr - l < 5 || b - t < 5) {
@@ -152,6 +158,7 @@ public class SettingsActivity extends Activity {
         e.putString("plcIp", ip).putInt("port", p).putString("reqDev", req).putString("resDev", res)
                 .putBoolean("autoStart", autoStart.isChecked())
                 .putInt("detMode", MODE_VALUES[checkedIndex(mode)]).putInt("polarity", checkedIndex(polarity))
+                .putInt("shape", checkedIndex(shape)).putInt("flatMin", fm)
                 .putInt("minArea", area).putInt("minContrast", con)
                 .putInt("average", avg).putInt("waitMs", wait).putInt("minConf", conf).putFloat("offset", off)
                 .putFloat("roiL", l / 100f).putFloat("roiT", t / 100f).putFloat("roiR", rr / 100f).putFloat("roiB", b / 100f)

@@ -68,45 +68,72 @@ public class LogicTest {
         c0.average = 2;
         j0.setConfig(c0);
         j0.startManual(0);
-        j0.offerFrame(res(-89, 80), 1, 1);
-        Judge.Outcome o0 = j0.offerFrame(res(89, 80), 2, 2);
+        j0.offerFrame(resAngle(-89, 80), 1, 1);
+        Judge.Outcome o0 = j0.offerFrame(resAngle(89, 80), 2, 2);
         check(o0 != null && Math.abs(Math.abs(o0.angleDeg) - 90) < 0.6, "±90°付近の平均 → " + (o0 == null ? "null" : fmt(o0.angleDeg)));
 
-        // 7. 背板の木口：平らな面の向き（上下左右）、いろいろな形・傾き
-        int[][] shapes = {{60, 60}, {150, 32}, {90, 40}, {200, 22}};   // 半径, 高さ（半円・薄い背板・中くらい・とても薄い）
-        String[] dn = {"", "下", "上", "左", "右"};
+        // 7. 木口の形と向き：背板・平行板・食パン形 × 4方向 × 傾き × 大きさ
+        String[] dn = {"不明", "下", "上", "左", "右"};
         int[] dirAng = {0, 270, 90, 180, 0};
-        int slabFail = 0, slabN = 0;
-        double minConf = 999;
-        for (int[] sh : shapes) {
+        int[] tilts = {-30, -12, 0, 10, 28};
+        double[][] sizes = {
+                {1, 150, 32}, {1, 60, 60}, {1, 110, 45}, {1, 220, 24},          // 背板 R, 高さ
+                {2, 160, 60}, {2, 130, 90}, {2, 180, 45},                       // 平行板 幅, 高さ
+                {3, 110, 90}, {3, 90, 110}, {3, 140, 70},                        // 食パン形 幅, 側面の高さ
+        };
+        int[] sfails = new int[4], counts = new int[4];
+        double[] minConf = {999, 999, 999, 999};
+        for (double[] sz : sizes) {
+            int type = (int) sz[0];
             for (int d = 1; d <= 4; d++) {
-                for (int tilt : new int[]{-30, -10, 0, 15, 35}) {
-                    byte[] img = slabImg(dirAng[d] + tilt, sh[0], sh[1], 0.5, 0.5, 200, 50, 10, rnd);
+                for (int tilt : tilts) {
+                    double base = dirAng[d] + tilt;
+                    byte[] img = shapeImg(type, base, sz[1], sz[2], 0.5, 0.5, 200, 50, 10, rnd, false);
                     AngleAnalyzer.Result r = AngleAnalyzer.analyze(img, W, H, new AngleAnalyzer.Params());
-                    slabN++;
-                    boolean ok = r.ok && r.direction == d;
-                    if (r.ok) minConf = Math.min(minConf, r.confidence);
+                    int expDir = d;
+                    if (type == 2) expDir = (d == 1 || d == 2) ? AngleAnalyzer.DIR_DOWN : AngleAnalyzer.DIR_LEFT;
+                    counts[type]++;
+                    boolean ok = r.ok && r.shape == type && r.direction == expDir && diff4(r.angleDeg, tilt) < 2;
+                    if (r.ok) minConf[type] = Math.min(minConf[type], r.confidence);
+                    if (r.ok && r.confidence < 40 && System.getProperty("verbose") != null)
+                        System.out.println("低信頼 " + AngleAnalyzer.shapeName(type) + " " + (int) sz[1] + "x" + (int) sz[2] + " 基準" + dn[d] + " 傾き" + tilt
+                                + " 信頼度" + fmt(r.confidence) + " 平らさ 下" + fmt(r.flatScore[1]) + " 上" + fmt(r.flatScore[2]) + " 左" + fmt(r.flatScore[3]) + " 右" + fmt(r.flatScore[4]));
                     if (!ok) {
-                        slabFail++;
-                        System.out.println("NG!! 背板 R" + sh[0] + " h" + sh[1] + " " + dn[d] + " 傾き" + tilt + " → "
-                                + (r.ok ? AngleAnalyzer.dirName(r.direction) : r.message) + " 信頼度" + fmt(r.confidence));
+                        sfails[type]++;
+                        System.out.println("NG!! " + AngleAnalyzer.shapeName(type) + " " + (int) sz[1] + "x" + (int) sz[2] + " 基準" + dn[d]
+                                + " 傾き" + tilt + " → " + (r.ok ? AngleAnalyzer.describe(r.shape, r.direction) + " 角度" + fmt(r.angleDeg) : r.message)
+                                + " 平らさ 下" + fmt(r.flatScore[1]) + " 上" + fmt(r.flatScore[2]) + " 左" + fmt(r.flatScore[3]) + " 右" + fmt(r.flatScore[4]));
                     }
                 }
             }
         }
-        check(slabFail == 0, "背板の向き " + (slabN - slabFail) + "/" + slabN + " 正解  最低信頼度 " + fmt(minConf));
-        // 暗い背景に樹皮（暗い縁）つき
-        for (int d = 1; d <= 4; d++) {
-            byte[] img = slabImg(dirAng[d] + 8, 110, 45, 0.45, 0.55, 190, 40, 12, rnd, true);
-            AngleAnalyzer.Result r = AngleAnalyzer.analyze(img, W, H, new AngleAnalyzer.Params());
-            check(r.ok && r.direction == d, "樹皮つき " + dn[d] + " → " + (r.ok ? AngleAnalyzer.dirName(r.direction) : r.message) + " 信頼度" + fmt(r.confidence));
+        for (int t = 1; t <= 3; t++) {
+            check(sfails[t] == 0, AngleAnalyzer.shapeName(t) + " 形と向き " + (counts[t] - sfails[t]) + "/" + counts[t] + " 正解  最低信頼度 " + fmt(minConf[t]));
         }
-        // 長方形（両面とも平ら）は信頼度が低い
-        byte[] rect = bar(5, 160, 50, 0.5, 0.5, 200, 50, 8, rnd);
-        AngleAnalyzer.Result rr = AngleAnalyzer.analyze(rect, W, H, new AngleAnalyzer.Params());
-        check(rr.confidence < 30, "長方形は向きの信頼度が低い " + fmt(rr.confidence));
+        // 樹皮つき（丸い面の縁が暗い）
+        for (int type = 1; type <= 3; type++) {
+            for (int d = 1; d <= 4; d++) {
+                double w1 = type == 1 ? 110 : type == 2 ? 150 : 110, h1 = type == 1 ? 45 : type == 2 ? 70 : 90;
+                byte[] img = shapeImg(type, dirAng[d] + 8, w1, h1, 0.45, 0.55, 190, 40, 12, rnd, true);
+                AngleAnalyzer.Result r = AngleAnalyzer.analyze(img, W, H, new AngleAnalyzer.Params());
+                int expDir = type == 2 ? ((d == 1 || d == 2) ? 1 : 3) : d;
+                check(r.ok && r.shape == type && r.direction == expDir, "樹皮つき " + AngleAnalyzer.shapeName(type) + " 基準" + dn[d] + " → "
+                        + (r.ok ? AngleAnalyzer.describe(r.shape, r.direction) : r.message) + " 信頼度" + fmt(r.confidence));
+            }
+        }
+        // 形を指定したとき
+        AngleAnalyzer.Params fixed = new AngleAnalyzer.Params();
+        fixed.shape = AngleAnalyzer.SHAPE_BREAD;
+        AngleAnalyzer.Result rb = AngleAnalyzer.analyze(shapeImg(3, 90 + 5, 110, 90, 0.5, 0.5, 200, 50, 10, rnd, false), W, H, fixed);
+        check(rb.ok && rb.shape == 3 && rb.direction == AngleAnalyzer.DIR_UP, "形指定（食パン形）丸い面が下 → " + AngleAnalyzer.describe(rb.shape, rb.direction));
+        // 平ら面ビット
+        AngleAnalyzer.Result rbits = AngleAnalyzer.analyze(shapeImg(3, 270, 110, 90, 0.5, 0.5, 200, 50, 10, rnd, false), W, H, new AngleAnalyzer.Params());
+        check(rbits.flatBits == (1 | 4 | 8), "食パン形の平ら面ビット 下左右=13 → " + rbits.flatBits);
+        // 四角（角材）
+        AngleAnalyzer.Result rsq = AngleAnalyzer.analyze(bar(7, 150, 80, 0.5, 0.5, 200, 50, 8, rnd), W, H, new AngleAnalyzer.Params());
+        check(rsq.ok && rsq.shape == AngleAnalyzer.SHAPE_SQUARE, "四角 → " + (rsq.ok ? AngleAnalyzer.shapeName(rsq.shape) : rsq.message));
         // 判別範囲からはみ出す → NG
-        byte[] big = slabImg(270, 250, 120, 0.5, 0.5, 200, 50, 5, rnd);
+        byte[] big = shapeImg(1, 270, 250, 120, 0.5, 0.5, 200, 50, 5, rnd, false);
         check(!AngleAnalyzer.analyze(big, W, H, new AngleAnalyzer.Params()).ok, "はみ出した木口はNG");
 
         // 8. PLCとの受け渡し（シンプルCPU通信の代わりにTCPで書込み・読出し）
@@ -143,8 +170,8 @@ public class LogicTest {
             check(mid[0] == 0, "途中では完了番号0");
             j.offerFrame(res(31, 90), now + 180, now + 180);
             short[] d = toShorts(call(out, in, read(100, 0xA8, 9)), 9);
-            check(d[0] == 1 && d[1] == 1 && Math.abs(d[3] - 260) <= 2 && d[6] == 90 && d[2] == 1,
-                    "結果 完了" + d[0] + " 結果" + d[1] + " 向き" + d[2] + " 角度" + d[3] + "(期待260=31-5) 信頼度" + d[6] + " 時間" + d[8]);
+            check(d[0] == 1 && d[1] == 1 && d[2] == 1 && d[3] == 1 && d[4] == 1 && Math.abs(d[5] - 260) <= 2 && d[6] == 90,
+                    "結果 完了" + d[0] + " 結果" + d[1] + " 向き" + d[2] + " 形" + d[3] + " ビット" + d[4] + " 角度" + d[5] + "(期待260=31-5) 信頼度" + d[6] + " 時間" + d[8]);
             // 同じ番号のままなら再判別しない
             j.poll(ms(t0));
             check(j.pending() == 0, "同じ番号は再判別しない");
@@ -194,6 +221,15 @@ public class LogicTest {
         r.cy = 0.5;
         r.direction = AngleAnalyzer.DIR_DOWN;
         r.flatNormalDeg = 270;
+        r.shape = AngleAnalyzer.SHAPE_SLAB;
+        r.flatBits = 1;
+        return r;
+    }
+
+    static AngleAnalyzer.Result resAngle(double ang, double conf) {
+        AngleAnalyzer.Result r = res(ang, conf);
+        r.shape = AngleAnalyzer.SHAPE_UNKNOWN;
+        r.direction = AngleAnalyzer.DIR_NONE;
         return r;
     }
 
@@ -215,30 +251,49 @@ public class LogicTest {
         return img;
     }
 
-    static byte[] slabImg(double normalDeg, double R, double h, double cx, double cy, int fgv, int bgv, int noise, Random rnd) {
-        return slabImg(normalDeg, R, h, cx, cy, fgv, bgv, noise, rnd, false);
-    }
-
-    /** 背板の木口（円の一部を弦で切った形）。normalDeg は平らな面の外向きの向き（右0°・反時計回り） */
-    static byte[] slabImg(double normalDeg, double R, double h, double cx, double cy, int fgv, int bgv, int noise, Random rnd, boolean bark) {
+    /**
+     * 木口の合成画像。type 1=背板(p1=半径, p2=高さ) 2=平行板(p1=幅, p2=高さ) 3=食パン形(p1=幅, p2=側面の高さ)。
+     * 物体の座標（u右・v上）で基準面を下（v=0）に作り、基準面の外向きが baseDeg（右0°・反時計回り）になるよう回す。
+     */
+    static byte[] shapeImg(int type, double baseDeg, double p1, double p2, double cx, double cy, int fgv, int bgv, int noise, Random rnd, boolean bark) {
         byte[] img = new byte[W * H];
-        double t = Math.toRadians(normalDeg);
-        double nx = Math.cos(t), ny = -Math.sin(t);       // 平らな面の外向き（画面座標）
+        double rot = Math.toRadians(baseDeg - 270);
+        double cr = Math.cos(rot), sr = Math.sin(rot);
+        double height = type == 1 ? p2 : type == 2 ? p2 : p2 + p1 * 0.25;
         double px = cx * W, py = cy * H;
         for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) {
-                double dx = x + 0.5 - px, dy = y + 0.5 - py;
-                double v = -(dx * nx + dy * ny);            // 丸い側が＋
-                double u = dx * -ny + dy * nx;
-                double dist = Math.sqrt(u * u + (v - (h - R)) * (v - (h - R)));
-                boolean in = v >= -h / 2 + h / 2 && dist <= R;   // 弦は v=0
+                double X = x + 0.5 - px, Y = -(y + 0.5 - py);      // y上向き
+                double u = X * cr + Y * sr, v = -X * sr + Y * cr + height / 2;
+                double edge;   // 外周までの距離（樹皮の縁用、丸い面側のみ）
+                boolean in;
+                if (type == 1) {
+                    double R = p1, h = p2, d = Math.sqrt(u * u + (v - (h - R)) * (v - (h - R)));
+                    in = v >= 0 && d <= R;
+                    edge = R - d;
+                } else if (type == 2) {
+                    double t = (v - p2 / 2) / (p2 / 2);
+                    double half = p1 / 2 + p2 * 0.09 * (1 - t * t);   // 端のふくらみ（高さの9%）
+                    in = v >= 0 && v <= p2 && Math.abs(u) <= half;
+                    edge = half - Math.abs(u);
+                } else {
+                    double hw = p1 / 2, s = p1 * 0.25, R = (hw * hw + s * s) / (2 * s);
+                    double d = Math.sqrt(u * u + (v - (p2 + s - R)) * (v - (p2 + s - R)));
+                    in = v >= 0 && Math.abs(u) <= hw && (v <= p2 || d <= R);
+                    edge = v > p2 ? R - d : 99;
+                }
                 int val = bgv;
-                if (in) val = (bark && dist > R - 5) ? 95 : fgv;
+                if (in) val = (bark && edge < 5) ? 95 : fgv;
                 val += (int) (rnd.nextGaussian() * noise);
                 img[y * W + x] = (byte) Math.max(0, Math.min(255, val));
             }
         }
         return img;
+    }
+
+    static double diff4(double a, double b) {
+        double d = Math.abs(((a - b) % 90 + 90) % 90);
+        return Math.min(d, 90 - d);
     }
 
     // ---- SLMP 3E（Q互換）フレーム ----
