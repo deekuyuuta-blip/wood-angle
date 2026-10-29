@@ -1,0 +1,38 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'jp.yuta.woodangle'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'jp.yuta.woodangle'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // 更新インストールできるよう、毎回同じ鍵で署名する（個人利用のアプリ用）
+    signingConfigs {
+        fixed {
+            storeFile file('wood-angle.keystore')
+            storePassword 'woodangle'
+            keyAlias 'wood'
+            keyPassword 'woodangle'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fixed
+        }
+    }
+}
