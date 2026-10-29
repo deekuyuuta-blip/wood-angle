@@ -14,6 +14,7 @@ import android.view.View;
  * カメラ画像（判別に使う縮小画像そのもの）と判別結果を描く。
  *  黄色の枠：判別範囲、緑：木材と判定した画素（輪郭）／強いエッジ（エッジ）
  *  赤い線：測った軸、水色の線：基準角度（ゼロ合わせ）
+ *  背板モードの矢印：平らな面の向き（下=緑、それ以外=橙）
  * 範囲設定モードでは、指でなぞった四角を新しい判別範囲にする。
  */
 final class FrameView extends View {
@@ -40,6 +41,7 @@ final class FrameView extends View {
     private final Paint pRef = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pText = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pDrag = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pArrow = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     FrameView(Context c) {
         super(c);
@@ -58,6 +60,8 @@ final class FrameView extends View {
         pText.setColor(Color.WHITE);
         pText.setTextSize(16 * d);
         pText.setShadowLayer(3 * d, 0, 0, Color.BLACK);
+        pArrow.setStrokeWidth(6 * d);
+        pArrow.setStrokeCap(Paint.Cap.ROUND);
         pDrag.setStyle(Paint.Style.STROKE);
         pDrag.setColor(0xFF76FF03);
         pDrag.setStrokeWidth(3 * d);
@@ -127,7 +131,21 @@ final class FrameView extends View {
             float cx = ox + (float) (r.cx * fw) * s, cy = oy + (float) (r.cy * fh) * s;
             float len = (float) Math.max(r.halfLength, 20) * s;
             if (offsetDeg != 0) line(c, cx, cy, offsetDeg, len * 1.15f, pRef);
-            if (r.ok) {
+            if (r.ok && r.direction != AngleAnalyzer.DIR_NONE) {
+                // 背板：平らな面の向きを矢印で
+                int dir = AngleAnalyzer.directionOf(r.flatNormalDeg - offsetDeg);
+                pArrow.setColor(dir == AngleAnalyzer.DIR_DOWN ? 0xFF00E676 : 0xFFFF9100);
+                double t = Math.toRadians(r.flatNormalDeg);
+                float ex = cx + (float) (Math.cos(t) * len * 0.9), ey = cy - (float) (Math.sin(t) * len * 0.9);
+                c.drawLine(cx, cy, ex, ey, pArrow);
+                for (int k = -1; k <= 1; k += 2) {
+                    double h = t + Math.PI + k * 0.5;
+                    c.drawLine(ex, ey, ex + (float) (Math.cos(h) * len * 0.3), ey - (float) (Math.sin(h) * len * 0.3), pArrow);
+                }
+                line(c, cx, cy, r.angleDeg, len, pAxis);
+                c.drawText("平らな面：" + AngleAnalyzer.dirName(dir) + (dir == AngleAnalyzer.DIR_DOWN ? "（OK）" : ""),
+                        ox + 12, oy + fh * s - 12, pText);
+            } else if (r.ok) {
                 line(c, cx, cy, r.angleDeg, len, pAxis);
                 c.drawCircle(cx, cy, pAxis.getStrokeWidth() * 1.6f, pAxis);
             }

@@ -8,22 +8,24 @@ import java.util.Locale;
  * PLC → スマホ（PLCが書込む）
  *   要求デバイス（例 D0）: 撮影要求番号。PLCが判別させたいとき 1〜32767 の新しい番号を書く。
  *                          0 にすると完了番号・結果も 0 に戻る。
- * スマホ → PLC（PLCが読出す）  結果デバイスの先頭（例 D100）から8ワード
+ * スマホ → PLC（PLCが読出す）  結果デバイスの先頭（例 D100）から9ワード
  *   +0 完了番号   判別が終わると要求番号と同じ値になる（PLCはこれが要求番号と一致したら結果を使う）
- *   +1 結果       1=OK  2=NG（木材なし・信頼度不足）  3=カメラ異常（時間内に画像が来ない）
- *   +2 角度       0.1°単位の符号付き（例 123 = +12.3°）。-900〜+900
- *   +3 中心X      画面幅に対する 0〜1000
- *   +4 中心Y      画面高さに対する 0〜1000
- *   +5 信頼度     0〜100
- *   +6 ハートビート 1秒ごとに+1
- *   +7 処理時間   要求を受けてから結果を書くまで [ms]
+ *   +1 結果       1=判別できた  2=NG（木材なし・信頼度不足）  3=カメラ異常（時間内に画像が来ない）
+ *   +2 向き       背板の平らな面の向き 1=下（OK） 2=上 3=左 4=右 0=不明
+ *   +3 角度       0.1°単位の符号付き（例 123 = +12.3°）。-900〜+900
+ *   +4 中心X      画面幅に対する 0〜1000
+ *   +5 中心Y      画面高さに対する 0〜1000
+ *   +6 信頼度     0〜100
+ *   +7 ハートビート 1秒ごとに+1
+ *   +8 処理時間   要求を受けてから結果を書くまで [ms]
  *
- * 結果の8ワードは1回でまとめて書くので、PLCが途中の値を読むことはない。
+ * 結果の9ワードは1回でまとめて書くので、PLCが途中の値を読むことはない。
  * スレッド：poll() は監視スレッド、offerFrame() はカメラのスレッドから呼ばれる。
  */
 public final class Judge {
 
-    public static final int WORDS = 8;
+    public static final int WORDS = 9;
+    private static final int HB = 7;
     public static final int RES_NONE = 0, RES_OK = 1, RES_NG = 2, RES_CAMERA = 3;
 
     /** 判別の設定 */
@@ -49,6 +51,8 @@ public final class Judge {
         public double angleDeg;
         public double cx, cy;
         public double confidence;
+        /** 背板の平らな面の向き（AngleAnalyzer.DIR_*） */
+        public int direction;
         public int elapsedMs;
         public String message = "";
         public boolean manual;
@@ -56,7 +60,7 @@ public final class Judge {
 
         public String codeText() {
             switch (code) {
-                case RES_OK: return "OK";
+                case RES_OK: return "判別OK";
                 case RES_NG: return "NG";
                 case RES_CAMERA: return "カメラ異常";
                 default: return "-";
@@ -78,6 +82,8 @@ public final class Judge {
     private long pendingSince;
     private int okCount, ngCount;
     private double sumCos, sumSin, sumCx, sumCy, sumConf;
+    private final int[] dirVotes = new int[5];
+    private final double[] dirConf = new double[5];
     private String lastNg = "";
     private short heartbeat;
     private Outcome last;
@@ -128,7 +134,7 @@ public final class Judge {
                     handled = 0;
                     if (pending > 0) pending = 0;
                     short[] z = new short[WORDS];
-                    z[6] = heartbeat;
+                    z[HB] = heartbeat;
                     writeBlock(z);
                 }
             } else if ((pending == 0 || pending == MANUAL) && req != handled) {
@@ -147,7 +153,7 @@ public final class Judge {
     /** 1秒ごとに呼ぶ */
     public synchronized void tickHeartbeat() {
         heartbeat++;
-        mem.writeWords(cfg.result.code, cfg.result.number + 6, new short[]{heartbeat});
+        mem.writeWords(cfg.result.code, cfg.result.number + HB, new short[]{heartbeat});
     }
 
     /** 画面の「テスト判別」。PLCへは書かない */
@@ -162,6 +168,8 @@ public final class Judge {
         pendingSince = now;
         okCount = ngCount = 0;
         sumCos = sumSin = sumCx = sumCy = sumConf = 0;
+        java.util.Arrays.fill(dirVotes, 0);
+        java.util.Arrays.fill(dirConf, 0);
         lastNg = "";
     }
 
@@ -188,6 +196,11 @@ public final class Judge {
                 sumCx += r.cx;
                 sumCy += r.cy;
                 sumConf += r.confidence;
+                if (r.direction != AngleAnalyzer.DIR_NONE) {
+                    int d = AngleAnalyzer.directionOf(r.flatNormalDeg - cfg.offsetDeg);
+                    dirVotes[d]++;
+                    dirConf[d] += r.confidence;
+                }
             } else {
                 ngCount++;
                 lastNg = r.message;
@@ -212,13 +225,23 @@ public final class Judge {
             o.cx = sumCx / okCount;
             o.cy = sumCy / okCount;
             o.confidence = sumConf / okCount;
+            int best = 0, votes = 0;
+            for (int d = 1; d < 5; d++) {
+                if (dirVotes[d] > dirVotes[best] || (dirVotes[d] == dirVotes[best] && dirConf[d] > dirConf[best])) best = d;
+                votes += dirVotes[d];
+            }
+            o.direction = dirVotes[best] > 0 ? best : AngleAnalyzer.DIR_NONE;
             if (ngCount > okCount) {
                 code = RES_NG;
                 o.message = "NGの画像が多い（" + lastNg + "）";
             } else if (o.confidence < cfg.minConfidence) {
                 code = RES_NG;
                 o.message = String.format(Locale.ROOT, "信頼度不足（%.0f < %d）", o.confidence, cfg.minConfidence);
+            } else if (votes > 0 && dirVotes[best] * 2 <= votes) {
+                code = RES_NG;
+                o.message = "向きが画像ごとにばらつきます";
             }
+            if (code != RES_OK) o.direction = AngleAnalyzer.DIR_NONE;
         } else {
             o.message = lastNg;
         }
@@ -228,13 +251,14 @@ public final class Judge {
             b[0] = (short) pending;
             b[1] = (short) code;
             if (code != RES_CAMERA && okCount > 0) {
-                b[2] = (short) Math.round(o.angleDeg * 10);
-                b[3] = (short) Math.round(o.cx * 1000);
-                b[4] = (short) Math.round(o.cy * 1000);
-                b[5] = (short) Math.round(Math.min(100, o.confidence));
+                b[2] = (short) o.direction;
+                b[3] = (short) Math.round(o.angleDeg * 10);
+                b[4] = (short) Math.round(o.cx * 1000);
+                b[5] = (short) Math.round(o.cy * 1000);
+                b[6] = (short) Math.round(Math.min(100, o.confidence));
             }
-            b[6] = heartbeat;
-            b[7] = (short) o.elapsedMs;
+            b[HB] = heartbeat;
+            b[8] = (short) o.elapsedMs;
             writeBlock(b);
             handled = pending;
         }

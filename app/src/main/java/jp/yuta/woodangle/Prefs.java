@@ -19,7 +19,7 @@ final class Prefs {
     String resultDevice() { return sp.getString("resDev", "D100"); }
 
     // ---- 判別 ----
-    int mode() { return sp.getInt("mode", AngleAnalyzer.MODE_CONTOUR); }
+    int mode() { return sp.getInt("detMode", AngleAnalyzer.MODE_SLAB); }
     int polarity() { return sp.getInt("polarity", AngleAnalyzer.POLARITY_AUTO); }
     float roiL() { return sp.getFloat("roiL", 0.05f); }
     float roiT() { return sp.getFloat("roiT", 0.05f); }

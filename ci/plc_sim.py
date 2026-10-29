@@ -2,7 +2,7 @@
 
 同じWi-FiのPCから、スマホ（木材角度判別アプリ）に3Eフレームで
   書込み: 要求番号 → スマホの D0
-  読出し: スマホの D100〜D107 → 結果
+  読出し: スマホの D100〜D108 → 結果
 を200msごとに行い、数秒ごとに撮影要求を出して結果を表示する。
 
 使い方:  python plc_sim.py <スマホのIP> [ポート=5000] [要求の間隔秒=3]
@@ -16,7 +16,8 @@ import time
 host = sys.argv[1]
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 5000
 interval = float(sys.argv[3]) if len(sys.argv) > 3 else 3.0
-RESULT = {0: "-", 1: "OK", 2: "NG", 3: "カメラ異常"}
+RESULT = {0: "-", 1: "判別OK", 2: "NG", 3: "カメラ異常"}
+DIRECTION = {0: "不明", 1: "下(OK)", 2: "上", 3: "左", 4: "右"}
 
 
 def frame(cmd, sub, data):
@@ -64,11 +65,11 @@ while True:
     # PLC → スマホ（書込み）
     call(s, frame(0x1401, 0, head(0, 0xA8, 1) + struct.pack("<H", req)))
     # スマホ → PLC（読出し）
-    d = struct.unpack("<8h", call(s, frame(0x0401, 0, head(100, 0xA8, 8))))
-    done, res, ang, cx, cy, conf, hb, ms = d
+    d = struct.unpack("<9h", call(s, frame(0x0401, 0, head(100, 0xA8, 9))))
+    done, res, dr, ang, cx, cy, conf, hb, ms = d
     if waiting and done == req:
-        print("要求%5d  %-6s 角度 %+6.1f°  中心(%4d,%4d)  信頼度 %3d  スマホ処理 %4dms  往復 %4.0fms"
-              % (req, RESULT.get(res, res), ang / 10, cx, cy, conf, ms, (time.time() - sent_at) * 1000))
+        print("要求%5d  %-6s 平らな面 %-6s 角度 %+6.1f°  信頼度 %3d  スマホ処理 %4dms  往復 %4.0fms"
+              % (req, RESULT.get(res, res), DIRECTION.get(dr, dr), ang / 10, conf, ms, (time.time() - sent_at) * 1000))
         waiting = False
         next_req = time.time() + interval
     elif waiting and now - sent_at > 5:

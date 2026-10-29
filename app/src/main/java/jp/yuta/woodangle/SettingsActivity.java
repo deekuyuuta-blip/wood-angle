@@ -57,7 +57,7 @@ public class SettingsActivity extends Activity {
                 "PLCが撮影要求番号（1〜32767）を書込むワードデバイス。番号が変わるたびに1回判別します。");
         reqDev.setText(prefs.requestDevice());
         resDev = field(f, "結果デバイスの先頭（スマホ → PLC）", "例: D100", TEXT,
-                "ここから8ワード：完了番号・結果・角度(0.1°)・中心X・中心Y・信頼度・ハートビート・処理時間。");
+                "ここから9ワード：完了番号・結果・向き・角度(0.1°)・中心X・中心Y・信頼度・ハートビート・処理時間。");
         resDev.setText(prefs.resultDevice());
         autoStart = new CheckBox(this);
         autoStart.setText("アプリ起動時に自動で待受を開始");
@@ -65,9 +65,10 @@ public class SettingsActivity extends Activity {
         f.addView(autoStart);
 
         section(f, "判別のしかた");
-        mode = radios(f, new String[]{"輪郭（木材全体が映る）", "エッジ（木材が画面からはみ出す・木目）"}, prefs.mode());
-        note(f, "輪郭：背景との明るさの差で木材を切り出し、長手方向を測ります。\nエッジ：画面内の縁・木目の向きの平均を測ります。");
-        label(f, "木材の明るさ（輪郭モード）");
+        mode = radios(f, new String[]{"背板の向き（木口の平らな面が上下左右のどれか）", "角度：輪郭（木材全体が映る）", "角度：エッジ（木材が画面からはみ出す・木目）"},
+                indexOf(MODE_VALUES, prefs.mode()));
+        note(f, "背板の向き：木口を背景との明るさの差で切り出し、まっすぐな面（平らな面）と丸い面を見分けます。木口全体が判別範囲に入るようにしてください。\n輪郭：木材の長手方向の角度を測ります。\nエッジ：画面内の縁・木目の向きの平均を測ります。");
+        label(f, "木材（木口）の明るさ");
         polarity = radios(f, new String[]{"自動", "木材が背景より明るい", "木材が背景より暗い"}, prefs.polarity());
         minArea = field(f, "最小面積（%）", "例: 2", NUM, "判別範囲に対して、これより小さいかたまりは木材とみなしません。");
         minArea.setText(String.valueOf(prefs.minArea()));
@@ -126,7 +127,7 @@ public class SettingsActivity extends Activity {
         if (res == null) return;
         Device rq = Device.parse(req), rs = Device.parse(res);
         if (rq.code == rs.code && rq.number >= rs.number && rq.number < rs.number + Judge.WORDS) {
-            err(reqDev, "結果デバイスの8ワードと重なっています");
+            err(reqDev, "結果デバイスの9ワードと重なっています");
             return;
         }
         Integer area = intIn(minArea, 0, 90), con = intIn(minContrast, 1, 255);
@@ -150,7 +151,7 @@ public class SettingsActivity extends Activity {
         SharedPreferences.Editor e = prefs.edit();
         e.putString("plcIp", ip).putInt("port", p).putString("reqDev", req).putString("resDev", res)
                 .putBoolean("autoStart", autoStart.isChecked())
-                .putInt("mode", checkedIndex(mode)).putInt("polarity", checkedIndex(polarity))
+                .putInt("detMode", MODE_VALUES[checkedIndex(mode)]).putInt("polarity", checkedIndex(polarity))
                 .putInt("minArea", area).putInt("minContrast", con)
                 .putInt("average", avg).putInt("waitMs", wait).putInt("minConf", conf).putFloat("offset", off)
                 .putFloat("roiL", l / 100f).putFloat("roiT", t / 100f).putFloat("roiR", rr / 100f).putFloat("roiB", b / 100f)
@@ -192,6 +193,13 @@ public class SettingsActivity extends Activity {
     }
 
     // ---- 部品 ----
+
+    private static final int[] MODE_VALUES = {AngleAnalyzer.MODE_SLAB, AngleAnalyzer.MODE_CONTOUR, AngleAnalyzer.MODE_EDGE};
+
+    private static int indexOf(int[] a, int v) {
+        for (int i = 0; i < a.length; i++) if (a[i] == v) return i;
+        return 0;
+    }
 
     private RadioGroup radios(LinearLayout f, String[] labels, int checked) {
         RadioGroup g = new RadioGroup(this);

@@ -17,6 +17,15 @@ public final class AngleAnalyzer {
 
     public static final int MODE_CONTOUR = 0;
     public static final int MODE_EDGE = 1;
+    /** 背板の木口：平らな面（鋸で挽いた面）が上下左右のどちらを向いているか */
+    public static final int MODE_SLAB = 2;
+
+    public static final int DIR_NONE = 0, DIR_DOWN = 1, DIR_UP = 2, DIR_LEFT = 3, DIR_RIGHT = 4;
+    private static final String[] DIR_NAMES = {"不明", "下", "上", "左", "右"};
+
+    public static String dirName(int d) {
+        return d >= 0 && d < DIR_NAMES.length ? DIR_NAMES[d] : "?";
+    }
 
     public static final int POLARITY_AUTO = 0;
     public static final int POLARITY_BRIGHT = 1;   // 木材が背景より明るい
@@ -24,7 +33,7 @@ public final class AngleAnalyzer {
 
     /** 判別の条件 */
     public static final class Params {
-        public int mode = MODE_CONTOUR;
+        public int mode = MODE_SLAB;
         public int polarity = POLARITY_AUTO;
         /** 判別範囲（画面に対する割合 0〜1） */
         public double roiLeft = 0.05, roiTop = 0.05, roiRight = 0.95, roiBottom = 0.95;
@@ -54,6 +63,11 @@ public final class AngleAnalyzer {
         public int roiX0, roiY0, roiX1, roiY1;
         /** 輪郭モード：木材が判別範囲の端に接している */
         public boolean touchesEdge;
+        /** 背板モード：平らな面の向き（DIR_*）と、その外向き法線の角度[°] */
+        public int direction = DIR_NONE;
+        public double flatNormalDeg;
+        /** 背板モード：平らな面・丸い面それぞれのふくらみ（厚みに対する比） */
+        public double flatBulge, roundBulge;
     }
 
     private AngleAnalyzer() {
@@ -218,6 +232,119 @@ public final class AngleAnalyzer {
         r.confidence = l1 <= 0 ? 0 : 100 * (1 - Math.sqrt(l2 / l1));
         r.halfLength = Math.sqrt(3 * l1);
         r.message = touch ? "判別範囲の端に接しています" : "";
+        if (p.mode == MODE_SLAB) slab(label, bestLabel, rw, rh, mx, my, theta, r);
+    }
+
+    /**
+     * 背板の木口の向き。長手方向（主軸）に沿って、両側の輪郭の「ふくらみ」を比べる。
+     * 平らな面（鋸で挽いた面）はまっすぐ、反対側（丸太の外周・樹皮側）は外へふくらむ。
+     */
+    private static void slab(int[] label, int lab, int rw, int rh, double mx, double my, double theta, Result r) {
+        if (r.touchesEdge) {
+            r.ok = false;
+            r.message = "木口が判別範囲からはみ出しています";
+            return;
+        }
+        double ux = Math.cos(theta), uy = Math.sin(theta);      // 主軸（y上向き）
+        double vx = -uy, vy = ux;                                // 主軸に直角（+側）
+        double umin = 1e9, umax = -1e9;
+        for (int y = 0; y < rh; y++) {
+            for (int x = 0; x < rw; x++) {
+                if (label[y * rw + x] != lab) continue;
+                double dx = x - mx, dy = -(y - my);
+                double u = dx * ux + dy * uy;
+                if (u < umin) umin = u;
+                if (u > umax) umax = u;
+            }
+        }
+        final int bins = 40;
+        double[] vMax = new double[bins], vMin = new double[bins];
+        java.util.Arrays.fill(vMax, -1e9);
+        java.util.Arrays.fill(vMin, 1e9);
+        double span = umax - umin;
+        if (span < 6) {
+            r.ok = false;
+            r.message = "木口が小さすぎます";
+            return;
+        }
+        for (int y = 0; y < rh; y++) {
+            for (int x = 0; x < rw; x++) {
+                if (label[y * rw + x] != lab) continue;
+                double dx = x - mx, dy = -(y - my);
+                double u = dx * ux + dy * uy, v = dx * vx + dy * vy;
+                int b = (int) Math.min(bins - 1, Math.max(0, (u - umin) / span * bins));
+                if (v > vMax[b]) vMax[b] = v;
+                if (v < vMin[b]) vMin[b] = v;
+            }
+        }
+        // 両端15%は角の丸み・樹皮のめくれがあるので使わない
+        int b0 = (int) (bins * 0.15), b1 = (int) Math.ceil(bins * 0.85);
+        int n = 0;
+        double[] t = new double[bins], pPlus = new double[bins], pMinus = new double[bins], th = new double[bins];
+        for (int b = b0; b < b1; b++) {
+            if (vMax[b] < vMin[b]) continue;
+            t[n] = ((b + 0.5) / bins - 0.5) * 2;   // -1〜1
+            pPlus[n] = vMax[b];
+            pMinus[n] = -vMin[b];                  // 外向きを＋にそろえる
+            th[n] = vMax[b] - vMin[b];
+            n++;
+        }
+        if (n < 8) {
+            r.ok = false;
+            r.message = "木口の形が読めません";
+            return;
+        }
+        double[] ts = java.util.Arrays.copyOf(th, n);
+        java.util.Arrays.sort(ts);
+        double thick = Math.max(1, ts[n / 2]);
+        double bPlus = bulge(t, pPlus, n) / thick;
+        double bMinus = bulge(t, pMinus, n) / thick;
+        boolean plusFlat = bPlus < bMinus;
+        r.flatBulge = plusFlat ? bPlus : bMinus;
+        r.roundBulge = plusFlat ? bMinus : bPlus;
+        double normal = Math.toDegrees(theta) + (plusFlat ? 90 : -90);
+        r.flatNormalDeg = normal;
+        r.direction = directionOf(normal);
+        r.confidence = Math.max(0, Math.min(100, 100 * (r.roundBulge - r.flatBulge)));
+    }
+
+    /** 2次式 a t^2 + b t + c を当てはめ、中央の外向きのふくらみ（-a）を返す */
+    private static double bulge(double[] t, double[] s, int n) {
+        // 正規方程式（t は -1〜1 なので数値的に安定）
+        double s0 = n, s1 = 0, s2 = 0, s3 = 0, s4 = 0, y0 = 0, y1 = 0, y2 = 0;
+        for (int i = 0; i < n; i++) {
+            double x = t[i], x2 = x * x;
+            s1 += x;
+            s2 += x2;
+            s3 += x2 * x;
+            s4 += x2 * x2;
+            y0 += s[i];
+            y1 += s[i] * x;
+            y2 += s[i] * x2;
+        }
+        double[][] m = {{s4, s3, s2, y2}, {s3, s2, s1, y1}, {s2, s1, s0, y0}};
+        for (int c = 0; c < 3; c++) {
+            int piv = c;
+            for (int k = c + 1; k < 3; k++) if (Math.abs(m[k][c]) > Math.abs(m[piv][c])) piv = k;
+            double[] tmp = m[c]; m[c] = m[piv]; m[piv] = tmp;
+            if (Math.abs(m[c][c]) < 1e-12) return 0;
+            for (int k = 0; k < 3; k++) {
+                if (k == c) continue;
+                double f = m[k][c] / m[c][c];
+                for (int j = c; j < 4; j++) m[k][j] -= f * m[c][j];
+            }
+        }
+        double a = m[0][3] / m[0][0];
+        return -a;
+    }
+
+    /** 外向き法線の角度（右0°・反時計回り＋）から上下左右 */
+    public static int directionOf(double normalDeg) {
+        double a = ((normalDeg % 360) + 360) % 360;
+        if (a >= 45 && a < 135) return DIR_UP;
+        if (a >= 135 && a < 225) return DIR_LEFT;
+        if (a >= 225 && a < 315) return DIR_DOWN;
+        return DIR_RIGHT;
     }
 
     // ------------------------------------------------------------------ エッジモード
